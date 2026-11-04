@@ -18,10 +18,14 @@ public class UserAdapter extends RecyclerView.Adapter<UserAdapter.VH> {
 
     public static final class Row {
         public final String username;
+        public final String status;
+        public final String meta;
         public final boolean hasKey;
 
-        public Row(String username, boolean hasKey) {
+        public Row(String username, String status, String meta, boolean hasKey) {
             this.username = username;
+            this.status = status;
+            this.meta = meta;
             this.hasKey = hasKey;
         }
     }
@@ -45,8 +49,9 @@ public class UserAdapter extends RecyclerView.Adapter<UserAdapter.VH> {
     public void onBindViewHolder(@NonNull VH h, int position) {
         Row r = rows.get(position);
         h.name.setText("@" + r.username);
-        h.status.setText(r.hasKey ? "Encryption key ready" : "No key yet");
-        h.status.setTextColor(r.hasKey ? 0xFF7CF3D4 : 0xFF8A97A8);
+        h.meta.setText(r.meta == null ? "" : r.meta);
+        h.status.setText(r.status);
+        h.status.setTextColor(r.hasKey ? 0xFF8A97A8 : 0xFFFF7A8A);
         h.itemView.setOnClickListener(v -> onPick.pick(r));
     }
 
@@ -56,11 +61,12 @@ public class UserAdapter extends RecyclerView.Adapter<UserAdapter.VH> {
     }
 
     static final class VH extends RecyclerView.ViewHolder {
-        final TextView name, status;
+        final TextView name, meta, status;
 
         VH(View v) {
             super(v);
             name = v.findViewById(R.id.name);
+            meta = v.findViewById(R.id.meta);
             status = v.findViewById(R.id.status);
         }
     }

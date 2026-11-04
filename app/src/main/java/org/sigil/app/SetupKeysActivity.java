@@ -48,6 +48,7 @@ public class SetupKeysActivity extends AppCompatActivity {
         getWindow().setFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE,
                 android.view.WindowManager.LayoutParams.FLAG_SECURE);
         setContentView(R.layout.activity_setup_keys);
+        EdgeToEdge.apply(this);
 
         keyName = findViewById(R.id.keyName);
         passphrase = findViewById(R.id.passphrase);

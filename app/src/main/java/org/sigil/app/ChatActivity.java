@@ -1,5 +1,6 @@
 package org.sigil.app;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -67,6 +68,7 @@ public class ChatActivity extends AppCompatActivity {
         super.onCreate(b);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         setContentView(R.layout.activity_chat);
+        EdgeToEdge.apply(this);
 
         identity = Session.identity();
         peer = getIntent().getStringExtra("user");
@@ -82,12 +84,18 @@ public class ChatActivity extends AppCompatActivity {
         sendBtn = findViewById(R.id.send);
         chatTimerBtn = findViewById(R.id.chatTimer);
         nextTimerBtn = findViewById(R.id.nextTimer);
+        findViewById(R.id.keysBtn).setOnClickListener(v ->
+                startActivity(new Intent(this, KeysActivity.class).putExtra("user", peer)));
 
-        adapter = new MessageAdapter(items);
+        adapter = new MessageAdapter(items, this::onMyMessageLongPress);
         LinearLayoutManager lm = new LinearLayoutManager(this);
         lm.setStackFromEnd(true);
         list.setLayoutManager(lm);
         list.setAdapter(adapter);
+        // Keep the newest message visible when the keyboard opens or the list resizes.
+        list.addOnLayoutChangeListener((v, l, t, r, bt, ol, ot, orr, ob) -> {
+            if (bt < ob && !items.isEmpty()) list.post(() -> list.scrollToPosition(items.size() - 1));
+        });
 
         selfKey = identity.selfEncryptionKey();
         sendBtn.setEnabled(false);
@@ -160,24 +168,73 @@ public class ChatActivity extends AppCompatActivity {
         JSONArray arr = json.optJSONArray("messages");
         List<MessageAdapter.Msg> out = new ArrayList<>();
         if (arr == null) return out;
-
         for (int i = 0; i < arr.length(); i++) {
             JSONObject m = arr.optJSONObject(i);
             if (m == null) continue;
             String mid = m.optString("id");
-            String text = cache.get(mid);
+            String body = m.optString("body");
+            // The cache key includes the body, so an edited message is decrypted again.
+            String key = mid + "|" + body.hashCode();
+            String text = cache.get(key);
             if (text == null) {
                 try {
-                    text = Pgp.decrypt(m.optString("body"), identity);
+                    text = Pgp.decrypt(body, identity);
                 } catch (Exception e) {
                     text = "Could not decrypt this message";
                 }
-                cache.put(mid, text);
+                cache.put(key, text);
             }
             boolean expiring = m.has("expiresAt") && !m.isNull("expiresAt");
-            out.add(new MessageAdapter.Msg(mid, m.optBoolean("mine"), text, expiring));
+            out.add(new MessageAdapter.Msg(mid, m.optBoolean("mine"), text, expiring, m.optBoolean("edited")));
         }
         return out;
+    }
+
+    private void onMyMessageLongPress(MessageAdapter.Msg m) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Your message")
+                .setItems(new String[]{"Edit", "Unsend", "Cancel"}, (d, which) -> {
+                    if (which == 0) showEditDialog(m);
+                    else if (which == 1) confirmUnsend(m);
+                })
+                .show();
+    }
+
+    private void showEditDialog(MessageAdapter.Msg m) {
+        final EditText et = new EditText(this);
+        et.setText(m.text);
+        et.setSelection(et.getText().length());
+        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        et.setPadding(pad, pad, pad, pad);
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Edit message")
+                .setView(et)
+                .setPositiveButton("Save", (d, w) -> {
+                    final String text = et.getText().toString().trim();
+                    if (text.isEmpty() || peerKey == null) return;
+                    Async.run(() -> {
+                        String armored = Pgp.encrypt(text, Arrays.asList(peerKey, selfKey));
+                        Api.editMessage(token, m.id, armored);
+                        return Boolean.TRUE;
+                    }, (ok, err) -> {
+                        if (err != null) Toast.makeText(this, Async.message(err), Toast.LENGTH_LONG).show();
+                        else poll();
+                    });
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void confirmUnsend(MessageAdapter.Msg m) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Unsend message?")
+                .setMessage("It will be removed from the server for both of you.")
+                .setPositiveButton("Unsend", (d, w) -> Async.run(() -> Api.unsend(token, m.id), (ok, err) -> {
+                    if (err != null) Toast.makeText(this, Async.message(err), Toast.LENGTH_LONG).show();
+                    else poll();
+                }))
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void send() {

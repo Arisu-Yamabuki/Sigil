@@ -1,16 +1,17 @@
 package org.sigil.app;
 
-import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.TextWatcher;
+import android.view.View;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
@@ -22,19 +23,35 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 public class HomeActivity extends AppCompatActivity {
+    private static final long INBOX_MS = 5000;
+    private static final DateTimeFormatter TIME =
+            DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault());
+
     private EditText search;
     private TextView empty, who;
     private RecyclerView list;
     private UserAdapter adapter;
     private final List<UserAdapter.Row> rows = new ArrayList<>();
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable runSearch = this::doSearch;
+    private final Runnable searchTask = this::doSearch;
+    private final Runnable inboxTick = new Runnable() {
+        @Override
+        public void run() {
+            loadInbox();
+            handler.postDelayed(this, INBOX_MS);
+        }
+    };
     private String token;
+    private boolean inboxBusy = false;
+    private boolean keyChecked = false;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -47,19 +64,28 @@ public class HomeActivity extends AppCompatActivity {
             finish();
             return;
         }
-        if (Session.identity() == null) {
-            if (Session.hasKeys(this)) {
-                setContentView(R.layout.activity_home);
-                bindViews();
-                promptUnlock();
-            } else {
-                startActivity(new Intent(this, SetupKeysActivity.class));
-                finish();
-            }
+        if (Session.identity() == null && !Session.hasKeys(this)) {
+            startActivity(new Intent(this, SetupKeysActivity.class));
+            finish();
             return;
         }
         setContentView(R.layout.activity_home);
+        EdgeToEdge.apply(this);
         bindViews();
+        if (Session.identity() == null) promptUnlock();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        handler.post(inboxTick);
+        verifyServerKey();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        handler.removeCallbacks(inboxTick);
     }
 
     private void bindViews() {
@@ -67,11 +93,8 @@ public class HomeActivity extends AppCompatActivity {
         empty = findViewById(R.id.empty);
         who = findViewById(R.id.who);
         list = findViewById(R.id.list);
-        Button lockBtn = findViewById(R.id.lockBtn);
-        Button signOutBtn = findViewById(R.id.signOutBtn);
 
         who.setText("Signed in as @" + Session.username(this));
-        empty.setText("Search for a username to start a private chat");
 
         adapter = new UserAdapter(rows, row -> {
             Intent i = new Intent(this, ChatActivity.class);
@@ -84,33 +107,80 @@ public class HomeActivity extends AppCompatActivity {
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int c, int d) {}
             @Override public void onTextChanged(CharSequence s, int a, int c, int d) {
-                handler.removeCallbacks(runSearch);
-                handler.postDelayed(runSearch, 300);
+                handler.removeCallbacks(searchTask);
+                handler.postDelayed(searchTask, 300);
             }
             @Override public void afterTextChanged(Editable e) {}
         });
 
-        lockBtn.setOnClickListener(v -> {
+        findViewById(R.id.aboutBtn).setOnClickListener(v -> startActivity(new Intent(this, AboutActivity.class)));
+        findViewById(R.id.keysBtn).setOnClickListener(v -> startActivity(new Intent(this, KeysActivity.class)));
+        findViewById(R.id.lockBtn).setOnClickListener(v -> {
             Session.lock();
+            keyChecked = false;
+            rows.clear();
+            adapter.notifyDataSetChanged();
             promptUnlock();
         });
-        signOutBtn.setOnClickListener(v -> confirmSignOut());
+        findViewById(R.id.signOutBtn).setOnClickListener(v -> confirmSignOut());
+    }
+
+    private String query() {
+        return search.getText().toString().trim().toLowerCase(Locale.ROOT);
+    }
+
+    /** Inbox: conversations with the latest message, decrypted on this phone. */
+    private void loadInbox() {
+        if (!query().isEmpty() || inboxBusy || token == null) return;
+        inboxBusy = true;
+        final Pgp.Identity id = Session.identity();
+        Async.run(() -> buildInbox(id), (fresh, err) -> {
+            inboxBusy = false;
+            if (err != null || !query().isEmpty()) return;
+            rows.clear();
+            rows.addAll(fresh);
+            adapter.notifyDataSetChanged();
+            boolean none = rows.isEmpty();
+            empty.setText(none ? "No conversations yet.\nSearch a username above to start a private chat." : "");
+            empty.setVisibility(none ? View.VISIBLE : View.GONE);
+        });
+    }
+
+    private List<UserAdapter.Row> buildInbox(Pgp.Identity id) throws Exception {
+        JSONArray arr = Api.inbox(token).optJSONArray("conversations");
+        List<UserAdapter.Row> out = new ArrayList<>();
+        if (arr == null) return out;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject c = arr.optJSONObject(i);
+            if (c == null) continue;
+            String preview;
+            if (id == null) {
+                preview = "Unlock Sigil to read";
+            } else {
+                try {
+                    preview = Pgp.decrypt(c.optString("lastBody"), id);
+                } catch (Exception e) {
+                    preview = "Encrypted message";
+                }
+            }
+            if (c.optBoolean("lastFromMe")) preview = "You: " + preview;
+            out.add(new UserAdapter.Row(c.optString("username"), preview, formatTime(c.optString("lastAt")), true));
+        }
+        return out;
     }
 
     private void doSearch() {
-        String q = search.getText().toString().trim().toLowerCase(Locale.ROOT);
+        final String q = query();
         if (q.length() < 2) {
-            rows.clear();
-            adapter.notifyDataSetChanged();
-            empty.setText("Search for a username to start a private chat");
-            empty.setVisibility(android.view.View.VISIBLE);
+            loadInbox();
             return;
         }
         Async.run(() -> Api.search(token, q), (json, err) -> {
+            if (!q.equals(query())) return;
             rows.clear();
             if (err != null) {
                 empty.setText(Async.message(err));
-                empty.setVisibility(android.view.View.VISIBLE);
+                empty.setVisibility(View.VISIBLE);
                 adapter.notifyDataSetChanged();
                 return;
             }
@@ -118,21 +188,54 @@ public class HomeActivity extends AppCompatActivity {
             if (arr != null) {
                 for (int i = 0; i < arr.length(); i++) {
                     JSONObject o = arr.optJSONObject(i);
-                    if (o != null) rows.add(new UserAdapter.Row(o.optString("username"), o.optBoolean("hasPublicKey")));
+                    if (o == null) continue;
+                    boolean hasKey = o.optBoolean("hasPublicKey");
+                    rows.add(new UserAdapter.Row(o.optString("username"),
+                            hasKey ? "Encryption key ready" : "No key yet", "", hasKey));
                 }
             }
             adapter.notifyDataSetChanged();
             boolean none = rows.isEmpty();
             empty.setText(none ? "No users found" : "");
-            empty.setVisibility(none ? android.view.View.VISIBLE : android.view.View.GONE);
+            empty.setVisibility(none ? View.VISIBLE : View.GONE);
+        });
+    }
+
+    private static String formatTime(String iso) {
+        try {
+            return TIME.format(Instant.parse(iso));
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** Warns when the server's key for this account differs from the key on this phone. */
+    private void verifyServerKey() {
+        final Pgp.Identity id = Session.identity();
+        if (id == null || keyChecked) return;
+        final String me = Session.username(this);
+        Async.run(() -> Api.publicKey(token, me).optString("fingerprint"), (serverFpr, err) -> {
+            if (err != null || serverFpr == null || serverFpr.isEmpty()) return;
+            keyChecked = true;
+            if (serverFpr.equalsIgnoreCase(id.fingerprint())) return;
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle("Key mismatch")
+                    .setMessage("The server has a different public key for @" + me + " than this phone. "
+                            + "Messages sent to the server's key can only be read on the phone that owns it.\n\n"
+                            + "Upload this phone's key so new messages reach you here?")
+                    .setPositiveButton("Upload this phone's key", (d, w) -> Async.run(
+                            () -> Api.uploadKey(token, id.publicArmor(), id.fingerprint()),
+                            (r, e2) -> Toast.makeText(this,
+                                    e2 == null ? "Key updated" : Async.message(e2), Toast.LENGTH_LONG).show()))
+                    .setNegativeButton("Later", null)
+                    .show();
         });
     }
 
     private void promptUnlock() {
-        final Context app = getApplicationContext();
         final EditText et = new EditText(this);
         et.setHint("Key passphrase");
-        et.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         int pad = (int) (20 * getResources().getDisplayMetrics().density);
         et.setPadding(pad, pad, pad, pad);
 
@@ -145,6 +248,7 @@ public class HomeActivity extends AppCompatActivity {
                 .setNegativeButton("Sign out", (d, w) -> confirmSignOut())
                 .create();
 
+        final android.content.Context app = getApplicationContext();
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             final char[] pass = et.getText().toString().toCharArray();
             Async.run(() -> Session.unlock(app, pass), (ident, err) -> {
@@ -153,6 +257,8 @@ public class HomeActivity extends AppCompatActivity {
                     return;
                 }
                 dialog.dismiss();
+                loadInbox();
+                verifyServerKey();
             });
         }));
         dialog.show();
@@ -161,9 +267,10 @@ public class HomeActivity extends AppCompatActivity {
     private void confirmSignOut() {
         new MaterialAlertDialogBuilder(this)
                 .setTitle("Sign out?")
-                .setMessage("This deletes your private key from this phone. Without a backup of your key you will lose access to your messages.")
-                .setPositiveButton("Delete and sign out", (d, w) -> {
-                    Session.clear(getApplicationContext());
+                .setMessage("Your encrypted key stays on this phone, so signing back in restores your messages. "
+                        + "To erase the key, use Keys, then Delete keys.")
+                .setPositiveButton("Sign out", (d, w) -> {
+                    Session.signOut(getApplicationContext());
                     Intent i = new Intent(this, LoginActivity.class);
                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
                     startActivity(i);

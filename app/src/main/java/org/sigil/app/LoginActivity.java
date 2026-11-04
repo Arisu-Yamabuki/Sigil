@@ -26,6 +26,7 @@ public class LoginActivity extends AppCompatActivity {
             return;
         }
         setContentView(R.layout.activity_login);
+        EdgeToEdge.apply(this);
         userInput = findViewById(R.id.username);
         passInput = findViewById(R.id.password);
         action = findViewById(R.id.actionButton);

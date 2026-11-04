@@ -69,12 +69,17 @@ public final class Session {
         identity = null;
     }
 
-    /** Full sign-out: deletes the token, the keys and everything cached on this phone. */
-    public static void clear(Context c) {
+    /** Signs out but keeps the encrypted key on this phone, so signing back in can still read history. */
+    public static void signOut(Context c) {
+        identity = null;
+        prefs(c).edit().remove("token").remove("username").apply();
+    }
+
+    /** Erases the private key from this phone. Messages encrypted to it become unreadable here. */
+    public static void wipeKeys(Context c) {
         identity = null;
         new File(c.getFilesDir(), SECRET_FILE).delete();
         new File(c.getFilesDir(), PUBLIC_FILE).delete();
-        prefs(c).edit().clear().apply();
     }
 
     private static void write(Context c, String name, String text) throws IOException {

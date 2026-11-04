@@ -65,6 +65,19 @@ public final class Api {
         return call("PUT", "/api/users/me/public-key", token, b);
     }
 
+    public static JSONObject inbox(String token) throws Exception {
+        return call("GET", "/api/messages/inbox", token, null);
+    }
+
+    public static JSONObject editMessage(String token, String id, String armoredBody) throws Exception {
+        JSONObject b = new JSONObject().put("body", armoredBody);
+        return call("PUT", "/api/messages/" + id, token, b);
+    }
+
+    public static JSONObject unsend(String token, String id) throws Exception {
+        return call("DELETE", "/api/messages/" + id, token, null);
+    }
+
     public static JSONObject messages(String token, String username) throws Exception {
         return call("GET", "/api/messages/with/" + username, token, null);
     }
