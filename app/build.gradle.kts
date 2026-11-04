@@ -1,0 +1,47 @@
+plugins {
+    id("com.android.application")
+}
+
+android {
+    namespace = "org.sigil.app"
+    compileSdk = 37
+
+    defaultConfig {
+        applicationId = "org.sigil.app"
+        minSdk = 26
+        targetSdk = 37
+        versionCode = 1
+        versionName = "1.0.0"
+        buildConfigField("String", "API_BASE", "\"https://sigil.adnand.com\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+        debug {
+            isMinifyEnabled = false
+        }
+    }
+}
+
+dependencies {
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.recyclerview:recyclerview:1.4.0")
+    implementation("androidx.activity:activity:1.10.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+    implementation("org.bouncycastle:bcpg-jdk18on:1.78.1")
+}

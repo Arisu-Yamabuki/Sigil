@@ -1,0 +1,52 @@
+# Built development files and build outputs
+**/build/
+*.aar
+*.ap_
+
+#  ALLOW APKs 
+# This tells Git NOT to ignore your compiled app files
+!*.apk
+
+# INTELIJ / ANDROID STUDIO (.idea) CONFIG 
+# 1. Ignore the entire .idea folder by default
+.idea/
+
+# 2. Whitelist ONLY the shared project settings that are safe for GitHub
+!.idea/codeStyles/
+!.idea/copyright/
+!.idea/compiler.xml
+!.idea/jarRepositories.xml
+!.idea/misc.xml
+!.idea/vcs.xml
+
+# 3. Explicitly block local user-specific junk (even if inside allowed subfolders)
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/gradle.xml
+.idea/assetWizardSettings.xml
+.idea/dictionaries/
+.idea/libraries/
+.idea/caches/
+.idea/navEditor.xml
+*.iml
+
+# Gradle system files
+.gradle/
+build/
+
+# Local configuration file (Contains your personal Android SDK paths—NEVER upload!)
+local.properties
+
+# Log files
+*.log
+
+# Keystore / Signing files (Keep your private release keys secure)
+*.jks
+*.keystore
+
+# Device / Emulator files
+captures/
+
+# OS specific temporary files
+.DS_Store
+Thumbs.db
