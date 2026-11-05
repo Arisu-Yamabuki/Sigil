@@ -78,6 +78,22 @@ public final class Api {
         return call("DELETE", "/api/messages/" + id, token, null);
     }
 
+    public static JSONObject getBlocks(String token) throws Exception {
+        return call("GET", "/api/blocks", token, null);
+    }
+
+    public static JSONObject block(String token, String username) throws Exception {
+        return call("POST", "/api/blocks/" + username, token, null);
+    }
+
+    public static JSONObject unblock(String token, String username) throws Exception {
+        return call("DELETE", "/api/blocks/" + username, token, null);
+    }
+
+    public static JSONObject ice(String token) throws Exception {
+        return call("GET", "/api/calls/ice", token, null);
+    }
+
     public static JSONObject messages(String token, String username) throws Exception {
         return call("GET", "/api/messages/with/" + username, token, null);
     }

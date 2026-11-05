@@ -2,6 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application
         android:name=".SigilApp"
@@ -28,6 +35,12 @@
         <activity android:name=".ChatActivity" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".KeysActivity" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".AboutActivity" />
+        <activity android:name=".SettingsActivity" />
+        <activity
+            android:name=".CallActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="portrait"
+            android:supportsPictureInPicture="false" />
     </application>
 
 </manifest>

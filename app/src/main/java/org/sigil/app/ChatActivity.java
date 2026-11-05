@@ -43,6 +43,7 @@ public class ChatActivity extends AppCompatActivity {
     private int nextTtl = -1;
     private boolean polling = false;
     private boolean visible = false;
+    private boolean blockedPeer = false;
 
     // Decrypted text lives only in memory and is cleared when the screen stops.
     private final Map<String, String> cache = new HashMap<>();
@@ -104,6 +105,9 @@ public class ChatActivity extends AppCompatActivity {
         nextTimerBtn.setOnClickListener(v -> pickNextTimer());
 
         loadPeer();
+        loadBlockState();
+        findViewById(R.id.callBtn).setOnClickListener(v -> startCall(false));
+        findViewById(R.id.peerName).setOnClickListener(v -> peerMenu());
         loadTimer();
         updateChips();
     }
@@ -111,6 +115,11 @@ public class ChatActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (Session.identity() == null) {
+            // Locked while away: never keep the old key reference around.
+            finish();
+            return;
+        }
         visible = true;
         handler.post(tick);
     }
@@ -235,6 +244,55 @@ public class ChatActivity extends AppCompatActivity {
                 }))
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    private void loadBlockState() {
+        Async.run(() -> Api.getBlocks(token), (json, err) -> {
+            if (err != null || json == null) return;
+            JSONArray arr = json.optJSONArray("blocked");
+            blockedPeer = false;
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) {
+                    if (peer.equals(arr.optString(i))) blockedPeer = true;
+                }
+            }
+            ((TextView) findViewById(R.id.peerName)).setText("@" + peer + (blockedPeer ? "  (blocked)" : ""));
+        });
+    }
+
+    private void startCall(boolean video) {
+        if (blockedPeer) {
+            Toast.makeText(this, "Unblock @" + peer + " to call", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        startActivity(new Intent(this, CallActivity.class)
+                .putExtra("peer", peer)
+                .putExtra("outgoing", true)
+                .putExtra("video", video));
+    }
+
+    private void peerMenu() {
+        String[] items = {"Video call", blockedPeer ? "Unblock @" + peer : "Block @" + peer, "Keys"};
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("@" + peer)
+                .setItems(items, (d, which) -> {
+                    if (which == 0) startCall(true);
+                    else if (which == 1) setBlocked(!blockedPeer);
+                    else startActivity(new Intent(this, KeysActivity.class).putExtra("user", peer));
+                })
+                .show();
+    }
+
+    private void setBlocked(boolean block) {
+        Async.run(() -> block ? Api.block(token, peer) : Api.unblock(token, peer), (json, err) -> {
+            if (err != null) {
+                Toast.makeText(this, Async.message(err), Toast.LENGTH_LONG).show();
+                return;
+            }
+            blockedPeer = block;
+            ((TextView) findViewById(R.id.peerName)).setText("@" + peer + (block ? "  (blocked)" : ""));
+            Toast.makeText(this, block ? "Blocked. They cannot message or call you." : "Unblocked", Toast.LENGTH_SHORT).show();
+        });
     }
 
     private void send() {

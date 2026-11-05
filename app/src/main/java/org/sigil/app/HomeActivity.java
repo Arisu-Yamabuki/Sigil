@@ -72,13 +72,15 @@ public class HomeActivity extends AppCompatActivity {
         setContentView(R.layout.activity_home);
         EdgeToEdge.apply(this);
         bindViews();
-        if (Session.identity() == null) promptUnlock();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         handler.post(inboxTick);
+        Signal.connect(token);
+        Signal.setListener(homeListener);
+        ensureUnlocked();
         verifyServerKey();
     }
 
@@ -87,6 +89,17 @@ public class HomeActivity extends AppCompatActivity {
         super.onPause();
         handler.removeCallbacks(inboxTick);
     }
+
+    /** Incoming calls arrive here while Home is on screen. */
+    private final Signal.Listener homeListener = m -> {
+        if (!"call".equals(m.optString("type")) || !"offer".equals(m.optString("kind"))) return;
+        if (Session.identity() == null) return;
+        startActivity(new Intent(this, CallActivity.class)
+                .putExtra("peer", m.optString("from"))
+                .putExtra("callId", m.optString("callId"))
+                .putExtra("video", m.optBoolean("video"))
+                .putExtra("offer", m.optString("body")));
+    };
 
     private void bindViews() {
         search = findViewById(R.id.search);
@@ -113,6 +126,7 @@ public class HomeActivity extends AppCompatActivity {
             @Override public void afterTextChanged(Editable e) {}
         });
 
+        findViewById(R.id.settingsBtn).setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
         findViewById(R.id.aboutBtn).setOnClickListener(v -> startActivity(new Intent(this, AboutActivity.class)));
         findViewById(R.id.keysBtn).setOnClickListener(v -> startActivity(new Intent(this, KeysActivity.class)));
         findViewById(R.id.lockBtn).setOnClickListener(v -> {
@@ -232,7 +246,15 @@ public class HomeActivity extends AppCompatActivity {
         });
     }
 
+    private boolean unlockShowing = false;
+
+    private void ensureUnlocked() {
+        if (Session.identity() == null && Session.hasKeys(this)) promptUnlock();
+    }
+
     private void promptUnlock() {
+        if (unlockShowing) return;
+        unlockShowing = true;
         final EditText et = new EditText(this);
         et.setHint("Key passphrase");
         et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
@@ -261,6 +283,7 @@ public class HomeActivity extends AppCompatActivity {
                 verifyServerKey();
             });
         }));
+        dialog.setOnDismissListener(d -> unlockShowing = false);
         dialog.show();
     }
 

@@ -24,6 +24,15 @@
             android:textStyle="bold" />
 
         <com.google.android.material.button.MaterialButton
+            android:id="@+id/callBtn"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:text="Call"
+            android:textAllCaps="false"
+            android:textColor="@color/teal" />
+
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/keysBtn"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
