@@ -2,26 +2,6 @@
 
 Package: `org.sigil.app`  ·  Server: `https://sigil.adnand.com`
 
-## Open and build
-
-1. Open this folder in Android Studio (latest stable). It uses its bundled JDK for Gradle.
-2. If `gradlew` is missing, run `gradle wrapper --gradle-version 9.1.0` in this folder, or let Android Studio create it.
-3. Install SDK Platform 37 from SDK Manager.
-4. Press Run, or build an APK with `./gradlew assembleRelease`.
-
-## Versions
-
-| Piece | Version |
-|---|---|
-| Gradle | 9.1.0 |
-| Android Gradle Plugin | 8.13.0 |
-| compileSdk / targetSdk | 37 |
-| minSdk | 26 (Android 8.0) |
-| Bytecode | Java 21 |
-| Crypto | Bouncy Castle 1.78.1 (OpenPGP, RSA-3072) |
-
-Gradle 9.1 runs on JDK 25 at most. Your system JDK 27 is fine for other tools. Gradle should use Android Studio's JDK, which is set under Settings → Build Tools → Gradle → Gradle JDK. Keep the bytecode at 21 so the app runs on every supported phone.
-
 ## How privacy works in the app
 
 - Your private key is created or imported on the phone. It is saved to app-private storage, and the GPG passphrase protects it.
