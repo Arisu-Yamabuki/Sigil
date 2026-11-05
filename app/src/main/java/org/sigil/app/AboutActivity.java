@@ -12,8 +12,8 @@ import androidx.appcompat.app.AppCompatActivity;
 public class AboutActivity extends AppCompatActivity {
     // Edit these before publishing.
     static final String GITHUB = "https://github.com/Arisu-Yamabuki/Sigil";
-    static final String INSTAGRAM = "https://instagram.com/YOUR_HANDLE";
-    static final String EMAIL = "YOUR_EMAIL@example.com";
+    static final String INSTAGRAM = "https://instagram.com/adnanisagoodboy";
+    static final String EMAIL = "mail@adnanD.com";
     static final String SERVER = "https://sigil.adnand.com";
 
     static final String PRIVACY =

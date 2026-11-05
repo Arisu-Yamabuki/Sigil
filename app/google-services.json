@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "170569668256",
+    "project_id": "sigil-dfe81",
+    "storage_bucket": "sigil-dfe81.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:170569668256:android:47b9644f55c7f870ff9bc5",
+        "android_client_info": {
+          "package_name": "org.sigil.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBhJgZSxgl2cMN2FaC4sIpZ2uy-hA1KwmY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

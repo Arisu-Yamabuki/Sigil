@@ -2,11 +2,15 @@ package org.sigil.app;
 
 import android.Manifest;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.InputType;
+import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -15,6 +19,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import org.bouncycastle.openpgp.PGPPublicKey;
 import org.json.JSONArray;
@@ -48,8 +53,11 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * One call, audio or video, peer to peer over WebRTC. Media is encrypted by WebRTC (DTLS-SRTP).
- * Setup messages go through the server as PGP ciphertext made for the other person's key.
+ * One call, audio or video, peer to peer over WebRTC. WebRTC encrypts the media itself (DTLS-SRTP).
+ * Setup messages travel through the server as PGP ciphertext made for the other person's key.
+ *
+ * The offer and answer are sent only after ICE gathering completes, so every network candidate
+ * is inside the SDP. That makes setup work even when the callee wakes from a push later.
  */
 public class CallActivity extends AppCompatActivity implements Signal.Listener {
 
@@ -57,15 +65,17 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     public static volatile boolean active = false;
 
     private static final long RING_TIMEOUT_MS = 45_000;
+    private static final long CONNECT_TIMEOUT_MS = 30_000;
+    private static final long GATHER_FALLBACK_MS = 4_000;
+    private static final String TAG = "SigilCall";
 
-    private String peer, token, callId;
-    private String pendingOffer;
-    private boolean video, outgoing;
-    private boolean ended = false;
-    private boolean released = false;
-    private boolean remoteSet = false;
-    private boolean muted = false;
-    private boolean cameraOff = false;
+    private String peer, token, callId, pendingOffer;
+    private boolean video, outgoing, declineOnly;
+    private boolean ended, released, remoteSet, muted, cameraOff;
+    private boolean gatheringDone, descSent;
+    private SessionDescription localDesc;
+    private boolean connected = false;
+    private boolean fallbackScheduled = false;
 
     private Pgp.Identity identity;
     private PGPPublicKey peerKey;
@@ -83,7 +93,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     private SurfaceViewRenderer localView, remoteView;
     private TextView title, status;
     private View incomingRow, controls;
-    private MaterialButton muteBtn, cameraBtn;
+    private MaterialButton acceptBtn, muteBtn, cameraBtn;
     private final List<String> queuedIce = new ArrayList<>();
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -98,60 +108,119 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        // Calls must not leak into screenshots or recents, and the screen stays on during a call.
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (Build.VERSION.SDK_INT >= 27) {
+            // Ring over the lock screen, like a phone call.
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+        }
         setContentView(R.layout.activity_call);
         EdgeToEdge.apply(this);
 
-        identity = Session.identity();
-        token = Session.token(this);
         peer = getIntent().getStringExtra("peer");
         video = getIntent().getBooleanExtra("video", false);
         outgoing = getIntent().getBooleanExtra("outgoing", false);
+        declineOnly = getIntent().getBooleanExtra("decline", false);
         pendingOffer = getIntent().getStringExtra("offer");
         callId = getIntent().getStringExtra("callId");
+        token = Session.token(this);
 
-        if (identity == null || token == null || peer == null) {
-            Toast.makeText(this, "Unlock Sigil to make calls", Toast.LENGTH_SHORT).show();
-            finish();
-            return;
-        }
-        if (outgoing) callId = UUID.randomUUID().toString();
-        if (callId == null || pendingOffer == null && !outgoing) {
-            finish();
-            return;
-        }
-
-        active = true;
         title = findViewById(R.id.title);
         status = findViewById(R.id.status);
         localView = findViewById(R.id.local);
         remoteView = findViewById(R.id.remote);
         incomingRow = findViewById(R.id.incomingRow);
         controls = findViewById(R.id.controls);
+        acceptBtn = findViewById(R.id.acceptBtn);
         muteBtn = findViewById(R.id.muteBtn);
         cameraBtn = findViewById(R.id.cameraBtn);
 
+        if (peer == null || token == null) {
+            finish();
+            return;
+        }
+        if (outgoing) callId = UUID.randomUUID().toString();
+        if (callId == null) {
+            finish();
+            return;
+        }
         title.setText("@" + peer);
-        setupRenderers();
-        Signal.setListener(this);
 
         findViewById(R.id.endBtn).setOnClickListener(v -> endCall("Call ended", true));
+        findViewById(R.id.declineBtn).setOnClickListener(v -> endCall("Call declined", true));
+        acceptBtn.setOnClickListener(v -> requestMediaThenBegin());
         muteBtn.setOnClickListener(v -> toggleMute());
         cameraBtn.setOnClickListener(v -> toggleCamera());
-        findViewById(R.id.acceptBtn).setOnClickListener(v -> requestMediaThenBegin());
-        findViewById(R.id.declineBtn).setOnClickListener(v -> endCall("Call declined", true));
 
+        Signal.connect(token);
+        Signal.setListener(this);
+
+        if (declineOnly) {
+            // Opened from the Decline button on the notification: tell the caller and leave.
+            Notifier.cancel(this, callId);
+            incomingRow.setVisibility(View.GONE);
+            status.setText("Declining...");
+            handler.postDelayed(() -> endCall("Call declined", true), 1500);
+            return;
+        }
+
+        active = true;
+        setupRenderers();
+
+        if (Session.identity() == null) {
+            if (Session.hasKeys(this)) promptUnlock();
+            else {
+                Toast.makeText(this, "Set up your keys first", Toast.LENGTH_SHORT).show();
+                finish();
+            }
+            return;
+        }
+        start();
+    }
+
+    private void promptUnlock() {
+        final EditText et = new EditText(this);
+        et.setHint("Key passphrase");
+        et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        et.setPadding(pad, pad, pad, pad);
+        final android.content.Context app = getApplicationContext();
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Unlock to answer")
+                .setMessage("Enter your key passphrase to read this call.")
+                .setView(et)
+                .setCancelable(false)
+                .setPositiveButton("Unlock", (d, w) -> Async.run(
+                        () -> Session.unlock(app, et.getText().toString().toCharArray()),
+                        (ident, err) -> {
+                            if (err != null) {
+                                Toast.makeText(this, "Wrong passphrase", Toast.LENGTH_SHORT).show();
+                                promptUnlock();
+                            } else {
+                                start();
+                            }
+                        }))
+                .setNegativeButton("Decline", (d, w) -> endCall("Call declined", true))
+                .show();
+    }
+
+    private void start() {
+        identity = Session.identity();
+        if (identity == null) return;
+        Notifier.cancel(this, callId);
         if (outgoing) {
             status.setText("Calling...");
             controls.setVisibility(View.VISIBLE);
             requestMediaThenBegin();
             handler.postDelayed(() -> {
-                if (!remoteSet) endCall("No answer", true);
+                if (!remoteSet && !ended) endCall("No answer", true);
             }, RING_TIMEOUT_MS);
         } else {
-            status.setText("Incoming " + (video ? "video" : "voice") + " call");
             incomingRow.setVisibility(View.VISIBLE);
+            acceptBtn.setEnabled(pendingOffer != null);
+            status.setText(pendingOffer != null
+                    ? "Incoming " + (video ? "video" : "voice") + " call"
+                    : "Connecting...");
         }
     }
 
@@ -177,16 +246,15 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     }
 
     private void requestMediaThenBegin() {
+        if (!outgoing && pendingOffer == null) return;
         incomingRow.setVisibility(View.GONE);
         controls.setVisibility(View.VISIBLE);
-        if (video) {
-            permissions.launch(new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA});
-        } else {
-            permissions.launch(new String[]{Manifest.permission.RECORD_AUDIO});
-        }
+        Notifier.cancel(this, callId);
+        if (video) permissions.launch(new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA});
+        else permissions.launch(new String[]{Manifest.permission.RECORD_AUDIO});
     }
 
-    /** Creates the peer connection after fetching TURN credentials and the other person's key. */
+    /** Fetches the other person's key and TURN credentials, then builds the connection. */
     private void begin() {
         if (ended || released) return;
         status.setText("Connecting...");
@@ -201,6 +269,8 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
             try {
                 initMedia();
                 createPeer(ice);
+                handler.postDelayed(this::connectTimeout, CONNECT_TIMEOUT_MS);
+                CallService.start(this, peer, video);
                 if (outgoing) makeOffer();
                 else acceptOffer();
             } catch (Exception e) {
@@ -243,7 +313,9 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     }
 
     private void createPeer(JSONObject ice) {
-        PeerConnection.RTCConfiguration cfg = new PeerConnection.RTCConfiguration(parseIce(ice));
+        List<PeerConnection.IceServer> servers = parseIce(ice);
+        Log.d(TAG, "ICE servers configured: " + servers.size());
+        PeerConnection.RTCConfiguration cfg = new PeerConnection.RTCConfiguration(servers);
         cfg.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
         cfg.bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE;
         cfg.rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE;
@@ -281,33 +353,43 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
 
         @Override
         public void onIceConnectionChange(PeerConnection.IceConnectionState state) {
+            Log.d(TAG, "ICE state: " + state);
             runOnUiThread(() -> {
-                if (state == PeerConnection.IceConnectionState.CONNECTED
-                        || state == PeerConnection.IceConnectionState.COMPLETED) {
-                    status.setText("Connected");
-                } else if (state == PeerConnection.IceConnectionState.DISCONNECTED
-                        || state == PeerConnection.IceConnectionState.FAILED) {
-                    endCall("Connection lost", true);
+                switch (state) {
+                    case CHECKING:
+                        status.setText("Finding a route...");
+                        break;
+                    case CONNECTED:
+                    case COMPLETED:
+                        connected = true;
+                        status.setText("Connected");
+                        break;
+                    case DISCONNECTED:
+                        if (connected) status.setText("Reconnecting...");
+                        break;
+                    case FAILED:
+                        endCall("Could not connect. The network or the relay server is blocking this call.", true);
+                        break;
+                    default:
+                        break;
                 }
             });
         }
 
         @Override public void onIceConnectionReceivingChange(boolean receiving) {}
-        @Override public void onIceGatheringChange(PeerConnection.IceGatheringState state) {}
 
         @Override
-        public void onIceCandidate(IceCandidate c) {
-            try {
-                JSONObject j = new JSONObject()
-                        .put("sdpMid", c.sdpMid)
-                        .put("sdpMLineIndex", c.sdpMLineIndex)
-                        .put("candidate", c.sdp);
-                sendSignal("ice", j.toString());
-            } catch (Exception ignored) {
-                // A candidate that cannot be encoded is simply not sent.
+        public void onIceGatheringChange(PeerConnection.IceGatheringState state) {
+            if (state == PeerConnection.IceGatheringState.COMPLETE) {
+                runOnUiThread(() -> {
+                    gatheringDone = true;
+                    maybeSendLocal();
+                });
             }
         }
 
+        // Candidates travel inside the SDP, so individual candidates are not sent.
+        @Override public void onIceCandidate(IceCandidate c) {}
         @Override public void onIceCandidatesRemoved(IceCandidate[] candidates) {}
         @Override public void onAddStream(MediaStream stream) {}
         @Override public void onRemoveStream(MediaStream stream) {}
@@ -325,6 +407,34 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
 
     // ---- Offer and answer -----------------------------------------------------------------
 
+    /**
+     * Sends our description once every candidate is inside it. If the gathering-complete callback
+     * never arrives, send anyway after a short wait, so setup cannot stall.
+     */
+    private void maybeSendLocal() {
+        if (localDesc == null || descSent) return;
+        if (!gatheringDone) {
+            if (!fallbackScheduled) {
+                fallbackScheduled = true;
+                handler.postDelayed(() -> {
+                    gatheringDone = true;
+                    maybeSendLocal();
+                }, GATHER_FALLBACK_MS);
+            }
+            return;
+        }
+        descSent = true;
+        boolean isOffer = localDesc.type == SessionDescription.Type.OFFER;
+        Log.d(TAG, "sending " + (isOffer ? "offer" : "answer"));
+        sendSignal(isOffer ? "offer" : "answer", sdpJson(localDesc));
+    }
+
+    private void connectTimeout() {
+        if (!connected && !ended) {
+            endCall("Could not connect in time. Check the relay (TURN) server setup.", true);
+        }
+    }
+
     private void makeOffer() {
         pc.createOffer(new SdpAdapter() {
             @Override
@@ -332,7 +442,10 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
                 pc.setLocalDescription(new SdpAdapter() {
                     @Override
                     public void onSetSuccess() {
-                        sendSignal("offer", sdpJson(desc));
+                        runOnUiThread(() -> {
+                            localDesc = desc;
+                            maybeSendLocal();
+                        });
                     }
 
                     @Override
@@ -369,7 +482,15 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
                                 pc.setLocalDescription(new SdpAdapter() {
                                     @Override
                                     public void onSetSuccess() {
-                                        sendSignal("answer", sdpJson(answer));
+                                        runOnUiThread(() -> {
+                                            localDesc = answer;
+                                            maybeSendLocal();
+                                        });
+                                    }
+
+                                    @Override
+                                    public void onSetFailure(String error) {
+                                        endCall("Setup failed", true);
                                     }
                                 }, answer);
                             }
@@ -449,10 +570,12 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
 
     // ---- Signaling ------------------------------------------------------------------------
 
-    /** Encrypts the plaintext for the other person and sends it. Empty body for control messages. */
+    /** Encrypts for the other person and sends. Control messages have an empty body. */
     private void sendSignal(String kind, String plain) {
         Async.run(() -> {
-            String body = (plain == null || peerKey == null) ? "" : Pgp.encrypt(plain, Collections.singletonList(peerKey));
+            String body = (plain == null || peerKey == null)
+                    ? ""
+                    : Pgp.encrypt(plain, Collections.singletonList(peerKey));
             JSONObject m = new JSONObject()
                     .put("type", "call")
                     .put("kind", kind)
@@ -478,13 +601,21 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         String kind = m.optString("kind");
         String cid = m.optString("callId");
         if (!callId.equals(cid)) {
-            // Already in a call: tell the other caller we are busy.
+            // Already on a call: tell the other caller we are busy.
             if ("offer".equals(kind)) sendBusy(m.optString("from"), cid);
             return;
         }
 
         String body = m.optString("body");
         switch (kind) {
+            case "offer":
+                // Arrived after the notification, from the queue on the server.
+                if (!outgoing && pendingOffer == null && !body.isEmpty()) {
+                    pendingOffer = body;
+                    acceptBtn.setEnabled(true);
+                    status.setText("Incoming " + (video ? "video" : "voice") + " call");
+                }
+                break;
             case "answer":
                 decryptThen(body, this::applyAnswer);
                 break;
@@ -536,8 +667,10 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     private void endCall(String message, boolean notifyPeer) {
         if (ended) return;
         ended = true;
-        if (notifyPeer && peerKey != null && callId != null) sendSignal("hangup", null);
-        status.setText(message);
+        if (notifyPeer && callId != null) sendSignal("hangup", null);
+        if (status != null) status.setText(message);
+        Notifier.cancel(this, callId);
+        CallService.stop(this);
         release();
         handler.postDelayed(this::finish, 1200);
     }
@@ -545,6 +678,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     private void release() {
         if (released) return;
         released = true;
+        CallService.stop(this);
         try {
             if (capturer != null) {
                 capturer.stopCapture();
@@ -567,7 +701,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         if (egl != null) egl.release();
     }
 
-    /** Callbacks that do nothing on their own. Subclasses override only what they need. */
+    /** Callbacks that do nothing by default. Subclasses override only what they need. */
     private static class SdpAdapter implements SdpObserver {
         @Override public void onCreateSuccess(SessionDescription d) {}
         @Override public void onSetSuccess() {}

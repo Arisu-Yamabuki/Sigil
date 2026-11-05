@@ -94,6 +94,10 @@ public final class Api {
         return call("GET", "/api/calls/ice", token, null);
     }
 
+    public static JSONObject pushToken(String token, String fcmToken) throws Exception {
+        return call("PUT", "/api/users/me/push-token", token, new JSONObject().put("token", fcmToken));
+    }
+
     public static JSONObject messages(String token, String username) throws Exception {
         return call("GET", "/api/messages/with/" + username, token, null);
     }

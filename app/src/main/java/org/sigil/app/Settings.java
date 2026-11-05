@@ -8,11 +8,32 @@ public final class Settings {
 
     private Settings() {}
 
+    private static android.content.SharedPreferences p(Context c) {
+        return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
     public static boolean autoLock(Context c) {
-        return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("autoLock", true);
+        return p(c).getBoolean("autoLock", true);
     }
 
     public static void setAutoLock(Context c, boolean on) {
-        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("autoLock", on).apply();
+        p(c).edit().putBoolean("autoLock", on).apply();
+    }
+
+    /** The ringtone URI the user picked, or null for the phone's default ringtone. */
+    public static String ringtone(Context c) {
+        return p(c).getString("ringtone", null);
+    }
+
+    public static void setRingtone(Context c, String uri) {
+        p(c).edit().putString("ringtone", uri).apply();
+    }
+
+    public static boolean vibrate(Context c) {
+        return p(c).getBoolean("vibrate", true);
+    }
+
+    public static void setVibrate(Context c, boolean on) {
+        p(c).edit().putBoolean("vibrate", on).apply();
     }
 }

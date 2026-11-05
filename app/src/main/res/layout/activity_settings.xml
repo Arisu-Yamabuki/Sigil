@@ -129,6 +129,58 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="28dp"
+                android:text="INCOMING CALLS"
+                android:textColor="@color/teal"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/ringtoneBtn"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="start|center_vertical"
+                android:minHeight="56dp"
+                android:text="Ringtone"
+                android:textAllCaps="false" />
+
+            <TextView
+                android:id="@+id/ringtoneLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:layout_marginStart="4dp"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_card"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Vibrate on incoming calls"
+                    android:textColor="@color/text"
+                    android:textSize="15sp" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/vibrateSwitch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
                 android:text="KEYS AND ABOUT"
                 android:textColor="@color/teal"
                 android:textSize="12sp"

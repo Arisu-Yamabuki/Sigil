@@ -1,6 +1,11 @@
 package org.sigil.app;
 
+import android.Manifest;
 import android.content.Intent;
+import android.os.Build;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.core.content.ContextCompat;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -72,6 +77,8 @@ public class HomeActivity extends AppCompatActivity {
         setContentView(R.layout.activity_home);
         EdgeToEdge.apply(this);
         bindViews();
+        askNotifications();
+        Push.register(this);
     }
 
     @Override
@@ -247,6 +254,18 @@ public class HomeActivity extends AppCompatActivity {
     }
 
     private boolean unlockShowing = false;
+
+    private final ActivityResultLauncher<String> notifPermission = registerForActivityResult(
+            new ActivityResultContracts.RequestPermission(), granted -> {});
+
+    /** Android 13+ needs permission before any call notification can ring. */
+    private void askNotifications() {
+        if (Build.VERSION.SDK_INT >= 33
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS);
+        }
+    }
 
     private void ensureUnlocked() {
         if (Session.identity() == null && Session.hasKeys(this)) promptUnlock();

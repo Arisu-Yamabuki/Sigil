@@ -2,6 +2,11 @@ plugins {
     id("com.android.application")
 }
 
+// Firebase is optional. Add app/google-services.json from the Firebase console to enable push.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "org.sigil.app"
     compileSdk = 37
@@ -11,7 +16,7 @@ android {
         minSdk = 26
         targetSdk = 37
         versionCode = 1
-        versionName = "1.0.1"
+        versionName = "1.0.0"
         buildConfigField("String", "API_BASE", "\"https://sigil.adnand.com\"")
     }
 
@@ -44,6 +49,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     implementation("org.bouncycastle:bcpg-jdk18on:1.78.1")
-   implementation("io.getstream:stream-webrtc-android:1.3.10")
+    implementation("io.getstream:stream-webrtc-android:1.3.10")
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging")
 }
