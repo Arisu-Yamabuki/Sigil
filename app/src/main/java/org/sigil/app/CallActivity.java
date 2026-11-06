@@ -6,6 +6,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Vibrator;
+import android.os.VibrationEffect;
+import android.media.AudioAttributes;
+import android.media.MediaPlayer;
 import android.text.InputType;
 import android.util.Log;
 import android.view.View;
@@ -75,8 +79,8 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     private boolean gatheringDone, descSent;
     private SessionDescription localDesc;
     private boolean connected = false;
-    private final java.util.LinkedList<String> diagLines = new java.util.LinkedList<>();
-    private TextView diagView;
+    private MediaPlayer ringer;
+    private Vibrator vibrator;
     /** Kinds of network paths found so far: host (local), srflx (public address), relay (TURN). */
     private final java.util.Set<String> routes = new java.util.TreeSet<>();
     private boolean fallbackScheduled = false;
@@ -130,7 +134,6 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         token = Session.token(this);
 
         title = findViewById(R.id.title);
-        diagView = findViewById(R.id.diag);
         status = findViewById(R.id.status);
         localView = findViewById(R.id.local);
         remoteView = findViewById(R.id.remote);
@@ -160,6 +163,8 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         Signal.connect(token);
         Signal.setListener(this);
 
+        if (!outgoing && !declineOnly) startRinging();
+
         if (declineOnly) {
             // Opened from the Decline button on the notification: tell the caller and leave.
             Notifier.cancel(this, callId);
@@ -181,6 +186,19 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
             return;
         }
         start();
+    }
+
+    /** Rings and vibrates until the call is answered, declined, or ends. */
+    private void startRinging() {
+        ringer = Ringer.startLoop(this);
+        vibrator = Ringer.startVibration(this);
+    }
+
+    private void stopRinging() {
+        Ringer.stop(ringer);
+        ringer = null;
+        Ringer.stopVibration(vibrator);
+        vibrator = null;
     }
 
     private void promptUnlock() {
@@ -229,22 +247,15 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         }
     }
 
-    /** Records an event in the log and on the call screen, so it can be read without a computer. */
+    /** Diagnostics are turned off. Events are not recorded or shown. */
     private void log(String msg) {
-        Log.d(TAG, msg);
-        runOnUiThread(() -> {
-            String time = new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
-                    .format(new java.util.Date());
-            diagLines.addLast(time + "  " + msg);
-            while (diagLines.size() > 14) diagLines.removeFirst();
-            if (diagView != null) diagView.setText(String.join("\n", diagLines));
-        });
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
         active = false;
+        stopRinging();
         Signal.releaseListener(this);
         handler.removeCallbacksAndMessages(null);
         release();
@@ -263,6 +274,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     }
 
     private void requestMediaThenBegin() {
+        stopRinging();
         if (!outgoing && pendingOffer == null) return;
         incomingRow.setVisibility(View.GONE);
         controls.setVisibility(View.VISIBLE);
@@ -728,6 +740,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         }
         if (ended) return;
         ended = true;
+        stopRinging();
         log("ending: " + message);
         if (notifyPeer && callId != null) sendSignal("hangup", null);
         if (status != null) status.setText(message);

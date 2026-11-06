@@ -17,6 +17,10 @@ public class SigilMessagingService extends FirebaseMessagingService {
     @Override
     public void onMessageReceived(RemoteMessage message) {
         Map<String, String> d = message.getData();
+        if ("test".equals(d.get("type"))) {
+            Notifier.showTest(this, d.get("text"));
+            return;
+        }
         if (!"call".equals(d.get("type"))) return;
         String from = d.get("from");
         String callId = d.get("callId");

@@ -117,18 +117,4 @@
             android:textAllCaps="false"
             android:textColor="@color/danger" />
     </LinearLayout>
-    <TextView
-        android:id="@+id/diag"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:layout_marginStart="12dp"
-        android:layout_marginEnd="12dp"
-        android:layout_marginBottom="170dp"
-        android:background="#CC07090D"
-        android:fontFamily="monospace"
-        android:padding="8dp"
-        android:textColor="@color/muted"
-        android:textIsSelectable="true"
-        android:textSize="11sp" />
 </FrameLayout>

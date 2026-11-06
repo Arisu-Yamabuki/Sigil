@@ -94,6 +94,26 @@ public final class Notifier {
         }
     }
 
+    /** Shows a visible notification for the server's push test. */
+    public static void showTest(Context c, String text) {
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        String id = "push_tests";
+        if (nm.getNotificationChannel(id) == null) {
+            nm.createNotificationChannel(new NotificationChannel(id, "Push tests", NotificationManager.IMPORTANCE_DEFAULT));
+        }
+        Notification n = new NotificationCompat.Builder(c, id)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("Sigil push test")
+                .setContentText(text == null ? "Firebase push works" : text)
+                .setAutoCancel(true)
+                .build();
+        try {
+            NotificationManagerCompat.from(c).notify(777, n);
+        } catch (SecurityException ignored) {
+            // Notification permission is not granted.
+        }
+    }
+
     public static void cancel(Context c, String callId) {
         if (callId == null) return;
         NotificationManagerCompat.from(c).cancel(notifId(callId));

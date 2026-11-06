@@ -222,6 +222,24 @@
                     android:layout_height="wrap_content" />
             </LinearLayout>
 
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/testRingtoneBtn"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="12dp"
+                android:text="Test ringtone (3 seconds)"
+                android:textAllCaps="false" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/testVibrateBtn"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="10dp"
+                android:text="Test vibration"
+                android:textAllCaps="false" />
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

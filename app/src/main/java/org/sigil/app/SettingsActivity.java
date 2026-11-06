@@ -59,6 +59,22 @@ public class SettingsActivity extends AppCompatActivity {
         relay.setOnCheckedChangeListener((btn, on) -> Settings.setRelayOnly(getApplicationContext(), on));
 
         ringtoneBtn = findViewById(R.id.ringtoneBtn);
+        findViewById(R.id.testRingtoneBtn).setOnClickListener(v -> {
+            final android.media.MediaPlayer p = Ringer.startLoop(this);
+            if (p == null) {
+                Toast.makeText(this, "Could not play a ringtone on this phone", Toast.LENGTH_LONG).show();
+                return;
+            }
+            new android.os.Handler(getMainLooper()).postDelayed(() -> Ringer.stop(p), 3000);
+        });
+        findViewById(R.id.testVibrateBtn).setOnClickListener(v -> {
+            android.os.Vibrator vib = getSystemService(android.os.Vibrator.class);
+            if (vib == null) {
+                Toast.makeText(this, "This phone has no vibration motor", Toast.LENGTH_LONG).show();
+                return;
+            }
+            vib.vibrate(android.os.VibrationEffect.createWaveform(new long[]{0, 600, 300, 600}, -1));
+        });
         ringtoneLabel = findViewById(R.id.ringtoneLabel);
         ringtoneBtn.setOnClickListener(v -> pickRingtone());
         refreshRingtone();
