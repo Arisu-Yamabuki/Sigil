@@ -36,4 +36,16 @@ public final class Settings {
     public static void setVibrate(Context c, boolean on) {
         p(c).edit().putBoolean("vibrate", on).apply();
     }
+
+    /**
+     * When on, calls always go through the TURN relay, even on the same network.
+     * The other person then never learns your IP address.
+     */
+    public static boolean relayOnly(Context c) {
+        return p(c).getBoolean("relayOnly", true);
+    }
+
+    public static void setRelayOnly(Context c, boolean on) {
+        p(c).edit().putBoolean("relayOnly", on).apply();
+    }
 }

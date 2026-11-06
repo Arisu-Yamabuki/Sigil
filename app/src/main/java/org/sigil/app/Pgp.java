@@ -210,13 +210,20 @@ public final class Pgp {
         throw new Exception("This user's key cannot encrypt");
     }
 
-    /** Finds the encryption-capable subkey of a public key ring. */
+    /**
+     * Finds the key to encrypt to: the encryption subkey, never the master key.
+     * Bouncy Castle reports an RSA master key as encryption-capable, so the subkey must be
+     * chosen explicitly. Encrypting to the master key makes openpgp.js (web) fail to decrypt.
+     */
     static PGPPublicKey encryptionKeyOf(PGPPublicKeyRing ring) {
+        PGPPublicKey fallback = null;
         for (Iterator<?> it = ring.getPublicKeys(); it.hasNext(); ) {
             PGPPublicKey k = (PGPPublicKey) it.next();
-            if (k.isEncryptionKey()) return k;
+            if (!k.isEncryptionKey()) continue;
+            if (!k.isMasterKey()) return k;
+            if (fallback == null) fallback = k;
         }
-        return null;
+        return fallback;
     }
 
     private static org.bouncycastle.openpgp.operator.PBESecretKeyDecryptor decryptor(char[] pass) throws Exception {

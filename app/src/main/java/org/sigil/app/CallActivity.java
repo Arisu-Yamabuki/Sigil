@@ -65,7 +65,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     public static volatile boolean active = false;
 
     private static final long RING_TIMEOUT_MS = 45_000;
-    private static final long CONNECT_TIMEOUT_MS = 30_000;
+    private static final long CONNECT_TIMEOUT_MS = 45_000;
     private static final long GATHER_FALLBACK_MS = 4_000;
     private static final String TAG = "SigilCall";
 
@@ -75,6 +75,10 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     private boolean gatheringDone, descSent;
     private SessionDescription localDesc;
     private boolean connected = false;
+    private final java.util.LinkedList<String> diagLines = new java.util.LinkedList<>();
+    private TextView diagView;
+    /** Kinds of network paths found so far: host (local), srflx (public address), relay (TURN). */
+    private final java.util.Set<String> routes = new java.util.TreeSet<>();
     private boolean fallbackScheduled = false;
 
     private Pgp.Identity identity;
@@ -126,6 +130,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         token = Session.token(this);
 
         title = findViewById(R.id.title);
+        diagView = findViewById(R.id.diag);
         status = findViewById(R.id.status);
         localView = findViewById(R.id.local);
         remoteView = findViewById(R.id.remote);
@@ -224,6 +229,18 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         }
     }
 
+    /** Records an event in the log and on the call screen, so it can be read without a computer. */
+    private void log(String msg) {
+        Log.d(TAG, msg);
+        runOnUiThread(() -> {
+            String time = new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+                    .format(new java.util.Date());
+            diagLines.addLast(time + "  " + msg);
+            while (diagLines.size() > 14) diagLines.removeFirst();
+            if (diagView != null) diagView.setText(String.join("\n", diagLines));
+        });
+    }
+
     @Override
     protected void onDestroy() {
         super.onDestroy();
@@ -269,7 +286,6 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
             try {
                 initMedia();
                 createPeer(ice);
-                handler.postDelayed(this::connectTimeout, CONNECT_TIMEOUT_MS);
                 CallService.start(this, peer, video);
                 if (outgoing) makeOffer();
                 else acceptOffer();
@@ -314,11 +330,16 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
 
     private void createPeer(JSONObject ice) {
         List<PeerConnection.IceServer> servers = parseIce(ice);
-        Log.d(TAG, "ICE servers configured: " + servers.size());
+        log("ICE servers configured: " + servers.size());
         PeerConnection.RTCConfiguration cfg = new PeerConnection.RTCConfiguration(servers);
         cfg.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
         cfg.bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE;
         cfg.rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE;
+        // Relay-only: every media path goes through the TURN server, hiding both IP addresses.
+        cfg.iceTransportsType = Settings.relayOnly(this)
+                ? PeerConnection.IceTransportsType.RELAY
+                : PeerConnection.IceTransportsType.ALL;
+        log("relay only: " + Settings.relayOnly(this));
         pc = factory.createPeerConnection(cfg, observer);
         if (pc == null) throw new IllegalStateException("Could not create the connection");
         pc.addTrack(audioTrack, Collections.singletonList("sigil"));
@@ -353,7 +374,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
 
         @Override
         public void onIceConnectionChange(PeerConnection.IceConnectionState state) {
-            Log.d(TAG, "ICE state: " + state);
+            log("ICE state: " + state);
             runOnUiThread(() -> {
                 switch (state) {
                     case CHECKING:
@@ -368,7 +389,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
                         if (connected) status.setText("Reconnecting...");
                         break;
                     case FAILED:
-                        endCall("Could not connect. The network or the relay server is blocking this call.", true);
+                        endCall("Could not connect. " + routeSummary(), true);
                         break;
                     default:
                         break;
@@ -388,8 +409,15 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
             }
         }
 
-        // Candidates travel inside the SDP, so individual candidates are not sent.
-        @Override public void onIceCandidate(IceCandidate c) {}
+        // Candidates travel inside the SDP and are not sent one by one.
+        // Here we only record which kinds of path were found, for diagnosis.
+        @Override
+        public void onIceCandidate(IceCandidate c) {
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile(" typ (\\w+)").matcher(c.sdp);
+            String type = m.find() ? m.group(1) : "unknown";
+            log("candidate found: " + type);
+            runOnUiThread(() -> routes.add(type));
+        }
         @Override public void onIceCandidatesRemoved(IceCandidate[] candidates) {}
         @Override public void onAddStream(MediaStream stream) {}
         @Override public void onRemoveStream(MediaStream stream) {}
@@ -412,7 +440,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
      * never arrives, send anyway after a short wait, so setup cannot stall.
      */
     private void maybeSendLocal() {
-        if (localDesc == null || descSent) return;
+        if (localDesc == null || descSent || pc == null) return;
         if (!gatheringDone) {
             if (!fallbackScheduled) {
                 fallbackScheduled = true;
@@ -423,16 +451,42 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
             }
             return;
         }
+        // Relay-only with no relay path: the connection cannot succeed, so say so now.
+        if (Settings.relayOnly(this) && !routes.contains("relay")) {
+            endCall("No relay path could be created. The relay server rejected the login or is unreachable.", true);
+            return;
+        }
+        // The description returned by createOffer/createAnswer has NO network addresses yet.
+        // Send the one WebRTC holds after gathering, which contains every address.
+        SessionDescription full = pc.getLocalDescription();
+        if (full == null) return;
+        localDesc = full;
         descSent = true;
         boolean isOffer = localDesc.type == SessionDescription.Type.OFFER;
-        Log.d(TAG, "sending " + (isOffer ? "offer" : "answer"));
+        int addresses = localDesc.description.split("a=candidate", -1).length - 1;
+        log("sending " + (isOffer ? "offer" : "answer") + " with " + addresses + " addresses");
         sendSignal(isOffer ? "offer" : "answer", sdpJson(localDesc));
+    }
+
+    private void setupFailed(String reason) {
+        log("setup failed: " + reason);
+        endCall("Setup failed: " + reason, true);
     }
 
     private void connectTimeout() {
         if (!connected && !ended) {
-            endCall("Could not connect in time. Check the relay (TURN) server setup.", true);
+            endCall("Could not connect in time. " + routeSummary(), true);
         }
+    }
+
+    /** Explains which paths were found, so the screen says what is missing. */
+    private String routeSummary() {
+        log("routes found: " + routes);
+        if (routes.isEmpty()) return "No network paths were found. Check this phone's internet connection.";
+        if (!routes.contains("relay")) {
+            return "Paths found: " + routes + ". No relay (TURN) path, so the relay server is unreachable or rejected the login.";
+        }
+        return "Paths found: " + routes + ". The relay exists but the two phones could not reach each other.";
     }
 
     private void makeOffer() {
@@ -450,14 +504,14 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
 
                     @Override
                     public void onSetFailure(String error) {
-                        endCall("Setup failed", true);
+                        setupFailed(error);
                     }
                 }, desc);
             }
 
             @Override
             public void onCreateFailure(String error) {
-                endCall("Setup failed", true);
+                        setupFailed(error);
             }
         }, offerConstraints());
     }
@@ -476,6 +530,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
                     public void onSetSuccess() {
                         remoteSet = true;
                         flushQueuedIce();
+                        handler.postDelayed(CallActivity.this::connectTimeout, CONNECT_TIMEOUT_MS);
                         pc.createAnswer(new SdpAdapter() {
                             @Override
                             public void onCreateSuccess(SessionDescription answer) {
@@ -490,25 +545,25 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
 
                                     @Override
                                     public void onSetFailure(String error) {
-                                        endCall("Setup failed", true);
+                        setupFailed(error);
                                     }
                                 }, answer);
                             }
 
                             @Override
                             public void onCreateFailure(String error) {
-                                endCall("Setup failed", true);
+                        setupFailed(error);
                             }
                         }, new MediaConstraints());
                     }
 
                     @Override
                     public void onSetFailure(String error) {
-                        endCall("Setup failed", true);
+                        setupFailed(error);
                     }
                 }, offer);
             } catch (Exception e) {
-                endCall("Setup failed", true);
+                setupFailed(String.valueOf(e.getMessage()));
             }
         });
     }
@@ -522,15 +577,16 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
                 public void onSetSuccess() {
                     remoteSet = true;
                     flushQueuedIce();
+                    handler.postDelayed(CallActivity.this::connectTimeout, CONNECT_TIMEOUT_MS);
                 }
 
                 @Override
                 public void onSetFailure(String error) {
-                    endCall("Setup failed", true);
+                        setupFailed(error);
                 }
             }, answer);
         } catch (Exception e) {
-            endCall("Setup failed", true);
+                setupFailed(String.valueOf(e.getMessage()));
         }
     }
 
@@ -607,6 +663,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         }
 
         String body = m.optString("body");
+        log("received " + kind);
         switch (kind) {
             case "offer":
                 // Arrived after the notification, from the queue on the server.
@@ -665,8 +722,13 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     // ---- Teardown -------------------------------------------------------------------------
 
     private void endCall(String message, boolean notifyPeer) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            runOnUiThread(() -> endCall(message, notifyPeer));
+            return;
+        }
         if (ended) return;
         ended = true;
+        log("ending: " + message);
         if (notifyPeer && callId != null) sendSignal("hangup", null);
         if (status != null) status.setText(message);
         Notifier.cancel(this, callId);

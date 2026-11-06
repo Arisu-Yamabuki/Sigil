@@ -15,8 +15,8 @@ android {
         applicationId = "org.sigil.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.2"
+        versionCode = 7
+        versionName = "1.0.6"
         buildConfigField("String", "API_BASE", "\"https://sigil.adnand.com\"")
     }
 

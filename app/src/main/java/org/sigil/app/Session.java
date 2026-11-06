@@ -13,13 +13,11 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Local session state. The server token is stored in preferences. The keys are stored as
- * passphrase-protected files. The unlocked identity exists only in memory.
+ * Local session state. Keys are stored per account, so each username has its own key files.
+ * The server token lives in preferences. The unlocked identity exists only in memory.
  */
 public final class Session {
     private static final String PREFS = "sigil_session";
-    private static final String SECRET_FILE = "secret.asc";
-    private static final String PUBLIC_FILE = "public.asc";
 
     private static volatile Pgp.Identity identity;
 
@@ -41,13 +39,24 @@ public final class Session {
         return prefs(c).getString("username", "");
     }
 
+    /** File names include the account, so one device can hold a key for each account. */
+    private static String secretName(Context c) {
+        return "secret_" + username(c) + ".asc";
+    }
+
+    private static String publicName(Context c) {
+        return "public_" + username(c) + ".asc";
+    }
+
     public static boolean hasKeys(Context c) {
-        return new File(c.getFilesDir(), SECRET_FILE).exists() && new File(c.getFilesDir(), PUBLIC_FILE).exists();
+        if (username(c).isEmpty()) return false;
+        return new File(c.getFilesDir(), secretName(c)).exists()
+                && new File(c.getFilesDir(), publicName(c)).exists();
     }
 
     public static void saveKeys(Context c, String secretArmor, String publicArmor) throws IOException {
-        write(c, SECRET_FILE, secretArmor);
-        write(c, PUBLIC_FILE, publicArmor);
+        write(c, secretName(c), secretArmor);
+        write(c, publicName(c), publicArmor);
     }
 
     public static Pgp.Identity identity() {
@@ -59,7 +68,7 @@ public final class Session {
     }
 
     public static Pgp.Identity unlock(Context c, char[] passphrase) throws Exception {
-        Pgp.Identity id = Pgp.load(read(c, SECRET_FILE), read(c, PUBLIC_FILE), passphrase);
+        Pgp.Identity id = Pgp.load(read(c, secretName(c)), read(c, publicName(c)), passphrase);
         identity = id;
         return id;
     }
@@ -69,17 +78,17 @@ public final class Session {
         identity = null;
     }
 
-    /** Signs out but keeps the encrypted key on this phone, so signing back in can still read history. */
+    /** Signs out but keeps this account's encrypted key on the phone. */
     public static void signOut(Context c) {
         identity = null;
         prefs(c).edit().remove("token").remove("username").apply();
     }
 
-    /** Erases the private key from this phone. Messages encrypted to it become unreadable here. */
+    /** Erases this account's private key from the phone. */
     public static void wipeKeys(Context c) {
         identity = null;
-        new File(c.getFilesDir(), SECRET_FILE).delete();
-        new File(c.getFilesDir(), PUBLIC_FILE).delete();
+        new File(c.getFilesDir(), secretName(c)).delete();
+        new File(c.getFilesDir(), publicName(c)).delete();
     }
 
     private static void write(Context c, String name, String text) throws IOException {

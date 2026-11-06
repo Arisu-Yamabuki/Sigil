@@ -54,6 +54,10 @@ public class SettingsActivity extends AppCompatActivity {
             Notifier.ensureChannel(this);
         });
 
+        MaterialSwitch relay = findViewById(R.id.relaySwitch);
+        relay.setChecked(Settings.relayOnly(this));
+        relay.setOnCheckedChangeListener((btn, on) -> Settings.setRelayOnly(getApplicationContext(), on));
+
         ringtoneBtn = findViewById(R.id.ringtoneBtn);
         ringtoneLabel = findViewById(R.id.ringtoneLabel);
         ringtoneBtn.setOnClickListener(v -> pickRingtone());
