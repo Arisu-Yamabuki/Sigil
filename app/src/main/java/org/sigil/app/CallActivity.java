@@ -21,6 +21,7 @@ import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.NotificationManagerCompat;
 
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -80,6 +81,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     private SessionDescription localDesc;
     private boolean connected = false;
     private MediaPlayer ringer;
+    private boolean fromPush;
     private Vibrator vibrator;
     /** Kinds of network paths found so far: host (local), srflx (public address), relay (TURN). */
     private final java.util.Set<String> routes = new java.util.TreeSet<>();
@@ -131,6 +133,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         declineOnly = getIntent().getBooleanExtra("decline", false);
         pendingOffer = getIntent().getStringExtra("offer");
         callId = getIntent().getStringExtra("callId");
+        fromPush = getIntent().getBooleanExtra("fromPush", false);
         token = Session.token(this);
 
         title = findViewById(R.id.title);
@@ -188,8 +191,16 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         start();
     }
 
-    /** Rings and vibrates until the call is answered, declined, or ends. */
+    /**
+     * Rings until the call is answered, declined, or ends. A push already rings through its
+     * notification. Otherwise the call notification rings, with the in-app player as a fallback.
+     */
     private void startRinging() {
+        if (outgoing || fromPush) return;
+        if (NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+            Notifier.showIncomingCall(this, peer, callId, video, false);
+            return;
+        }
         ringer = Ringer.startLoop(this);
         vibrator = Ringer.startVibration(this);
     }
@@ -199,6 +210,7 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         ringer = null;
         Ringer.stopVibration(vibrator);
         vibrator = null;
+        Notifier.cancel(this, callId);
     }
 
     private void promptUnlock() {
@@ -230,7 +242,6 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     private void start() {
         identity = Session.identity();
         if (identity == null) return;
-        Notifier.cancel(this, callId);
         if (outgoing) {
             status.setText("Calling...");
             controls.setVisibility(View.VISIBLE);
@@ -310,6 +321,8 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     private void initMedia() {
         PeerConnectionFactory.initialize(
                 PeerConnectionFactory.InitializationOptions.builder(getApplicationContext()).createInitializationOptions());
+        // Only WebRTC errors reach logcat. This must run after its native library has loaded.
+        org.webrtc.Logging.enableLogToDebugOutput(org.webrtc.Logging.Severity.LS_ERROR);
         factory = PeerConnectionFactory.builder()
                 .setVideoEncoderFactory(new DefaultVideoEncoderFactory(egl.getEglBaseContext(), true, true))
                 .setVideoDecoderFactory(new DefaultVideoDecoderFactory(egl.getEglBaseContext()))

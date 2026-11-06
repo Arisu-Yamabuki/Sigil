@@ -57,6 +57,7 @@
             android:foregroundServiceType="microphone|camera" />
         <activity
             android:name=".CallActivity"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="portrait"
             android:supportsPictureInPicture="false" />

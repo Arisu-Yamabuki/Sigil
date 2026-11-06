@@ -52,7 +52,13 @@ public final class Notifier {
         nm.createNotificationChannel(ch);
     }
 
+    /** A push wakes the phone, so the notification comes from the push. */
     public static void showIncomingCall(Context c, String from, String callId, boolean video) {
+        showIncomingCall(c, from, callId, video, true);
+    }
+
+    /** Posts the ringing call notification. Its sound repeats until the notification is cancelled. */
+    public static void showIncomingCall(Context c, String from, String callId, boolean video, boolean fromPush) {
         ensureChannel(c);
         String kind = video ? "video" : "voice";
 
@@ -60,6 +66,7 @@ public final class Notifier {
                 .putExtra("peer", from)
                 .putExtra("callId", callId)
                 .putExtra("video", video)
+                .putExtra("fromPush", fromPush)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         PendingIntent openPi = PendingIntent.getActivity(c, notifId(callId), open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -86,6 +93,8 @@ public final class Notifier {
                 .addAction(0, "Decline", declinePi)
                 .addAction(0, "Answer", openPi)
                 .build();
+        // Repeat the call sound until the call is answered, declined, or cancelled.
+        n.flags |= Notification.FLAG_INSISTENT;
 
         try {
             NotificationManagerCompat.from(c).notify(notifId(callId), n);

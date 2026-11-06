@@ -18,8 +18,6 @@ public class SigilApp extends Application {
         // Android ships a stripped "BC" provider. Replace it with the full Bouncy Castle one.
         Security.removeProvider("BC");
         Security.insertProviderAt(new BouncyCastleProvider(), 1);
-        // Only WebRTC errors reach logcat; its routine messages are switched off.
-        org.webrtc.Logging.enableLogToDebugOutput(org.webrtc.Logging.Severity.LS_ERROR);
 
         // Lock when the whole app goes to the background, unless a call is in progress.
         ProcessLifecycleOwner.get().getLifecycle().addObserver(new DefaultLifecycleObserver() {
