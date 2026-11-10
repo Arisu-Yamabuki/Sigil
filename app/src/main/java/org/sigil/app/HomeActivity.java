@@ -111,7 +111,7 @@ public class HomeActivity extends AppCompatActivity {
     private void bindViews() {
         search = findViewById(R.id.search);
         empty = findViewById(R.id.empty);
-        who = findViewById(R.id.who);
+        who = findViewById(R.id.headerSubtitle);
         list = findViewById(R.id.list);
 
         who.setText("Signed in as @" + Session.username(this));

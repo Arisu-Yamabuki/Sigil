@@ -70,6 +70,7 @@ public class ChatActivity extends AppCompatActivity {
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         setContentView(R.layout.activity_chat);
         EdgeToEdge.apply(this);
+        findViewById(R.id.back).setOnClickListener(v -> finish());
 
         identity = Session.identity();
         peer = getIntent().getStringExtra("user");
@@ -79,7 +80,7 @@ public class ChatActivity extends AppCompatActivity {
             return;
         }
 
-        ((TextView) findViewById(R.id.peerName)).setText("@" + peer);
+        ((TextView) findViewById(R.id.headerTitle)).setText("@" + peer);
         list = findViewById(R.id.messages);
         input = findViewById(R.id.input);
         sendBtn = findViewById(R.id.send);
@@ -107,7 +108,7 @@ public class ChatActivity extends AppCompatActivity {
         loadPeer();
         loadBlockState();
         findViewById(R.id.callBtn).setOnClickListener(v -> startCall(false));
-        findViewById(R.id.peerName).setOnClickListener(v -> peerMenu());
+        findViewById(R.id.headerTitle).setOnClickListener(v -> peerMenu());
         loadTimer();
         updateChips();
     }
@@ -256,7 +257,7 @@ public class ChatActivity extends AppCompatActivity {
                     if (peer.equals(arr.optString(i))) blockedPeer = true;
                 }
             }
-            ((TextView) findViewById(R.id.peerName)).setText("@" + peer + (blockedPeer ? "  (blocked)" : ""));
+            ((TextView) findViewById(R.id.headerTitle)).setText("@" + peer + (blockedPeer ? "  (blocked)" : ""));
         });
     }
 
@@ -290,7 +291,7 @@ public class ChatActivity extends AppCompatActivity {
                 return;
             }
             blockedPeer = block;
-            ((TextView) findViewById(R.id.peerName)).setText("@" + peer + (block ? "  (blocked)" : ""));
+            ((TextView) findViewById(R.id.headerTitle)).setText("@" + peer + (block ? "  (blocked)" : ""));
             Toast.makeText(this, block ? "Blocked. They cannot message or call you." : "Unblocked", Toast.LENGTH_SHORT).show();
         });
     }

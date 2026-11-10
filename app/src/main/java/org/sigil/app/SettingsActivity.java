@@ -1,10 +1,15 @@
 package org.sigil.app;
 
-import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.media.MediaPlayer;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -20,14 +25,17 @@ import com.google.android.material.materialswitch.MaterialSwitch;
 import org.json.JSONArray;
 
 public class SettingsActivity extends AppCompatActivity {
+    /** Replace with the real APKPure page once Sigil is published there. */
+    static final String APKPURE_URL = "https://apkpure.com/sigil/org.sigil.app";
+
     private LinearLayout blockedList;
     private TextView blockedEmpty, ringtoneLabel;
-    private MaterialButton ringtoneBtn;
     private String token;
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     private final ActivityResultLauncher<Intent> ringtonePicker = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(), r -> {
-                if (r.getResultCode() != Activity.RESULT_OK || r.getData() == null) return;
+                if (r.getResultCode() != RESULT_OK || r.getData() == null) return;
                 Uri picked = r.getData().getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI);
                 Settings.setRingtone(this, picked == null ? null : picked.toString());
                 Notifier.ensureChannel(this);
@@ -41,11 +49,17 @@ public class SettingsActivity extends AppCompatActivity {
         EdgeToEdge.apply(this);
 
         token = Session.token(this);
-        ((TextView) findViewById(R.id.username)).setText("@" + Session.username(this));
+        String name = Session.username(this);
+        ((TextView) findViewById(R.id.username)).setText("@" + name);
+        ((TextView) findViewById(R.id.avatar)).setText(name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase());
 
         MaterialSwitch autoLock = findViewById(R.id.autoLock);
         autoLock.setChecked(Settings.autoLock(this));
         autoLock.setOnCheckedChangeListener((btn, on) -> Settings.setAutoLock(getApplicationContext(), on));
+
+        MaterialSwitch relay = findViewById(R.id.relaySwitch);
+        relay.setChecked(Settings.relayOnly(this));
+        relay.setOnCheckedChangeListener((btn, on) -> Settings.setRelayOnly(getApplicationContext(), on));
 
         MaterialSwitch vibrate = findViewById(R.id.vibrateSwitch);
         vibrate.setChecked(Settings.vibrate(this));
@@ -54,38 +68,20 @@ public class SettingsActivity extends AppCompatActivity {
             Notifier.ensureChannel(this);
         });
 
-        MaterialSwitch relay = findViewById(R.id.relaySwitch);
-        relay.setChecked(Settings.relayOnly(this));
-        relay.setOnCheckedChangeListener((btn, on) -> Settings.setRelayOnly(getApplicationContext(), on));
-
-        ringtoneBtn = findViewById(R.id.ringtoneBtn);
-        findViewById(R.id.testRingtoneBtn).setOnClickListener(v -> {
-            final android.media.MediaPlayer p = Ringer.startLoop(this);
-            if (p == null) {
-                Toast.makeText(this, "Could not play a ringtone on this phone", Toast.LENGTH_LONG).show();
-                return;
-            }
-            new android.os.Handler(getMainLooper()).postDelayed(() -> Ringer.stop(p), 3000);
-        });
-        findViewById(R.id.testVibrateBtn).setOnClickListener(v -> {
-            android.os.Vibrator vib = getSystemService(android.os.Vibrator.class);
-            if (vib == null) {
-                Toast.makeText(this, "This phone has no vibration motor", Toast.LENGTH_LONG).show();
-                return;
-            }
-            vib.vibrate(android.os.VibrationEffect.createWaveform(new long[]{0, 600, 300, 600}, -1));
-        });
         ringtoneLabel = findViewById(R.id.ringtoneLabel);
-        ringtoneBtn.setOnClickListener(v -> pickRingtone());
+        findViewById(R.id.ringtoneBtn).setOnClickListener(v -> pickRingtone());
         refreshRingtone();
+
+        findViewById(R.id.testRingtoneBtn).setOnClickListener(v -> testRingtone());
+        findViewById(R.id.testVibrateBtn).setOnClickListener(v -> testVibration());
+        findViewById(R.id.batteryBtn).setOnClickListener(v -> allowBackground());
+        findViewById(R.id.apkpureBtn).setOnClickListener(v -> openUrl(APKPURE_URL));
+        findViewById(R.id.keysBtn).setOnClickListener(v -> startActivity(new Intent(this, KeysActivity.class)));
+        findViewById(R.id.aboutBtn).setOnClickListener(v -> startActivity(new Intent(this, AboutActivity.class)));
+        findViewById(R.id.back).setOnClickListener(v -> finish());
 
         blockedList = findViewById(R.id.blockedList);
         blockedEmpty = findViewById(R.id.blockedEmpty);
-
-        findViewById(R.id.back).setOnClickListener(v -> finish());
-        findViewById(R.id.keysBtn).setOnClickListener(v -> startActivity(new Intent(this, KeysActivity.class)));
-        findViewById(R.id.aboutBtn).setOnClickListener(v -> startActivity(new Intent(this, AboutActivity.class)));
-
         loadBlocked();
     }
 
@@ -100,15 +96,51 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void refreshRingtone() {
-        Uri uri = Notifier.ringtone(this);
         String name = "Default";
         try {
-            String t = RingtoneManager.getRingtone(this, uri).getTitle(this);
+            String t = RingtoneManager.getRingtone(this, Notifier.ringtone(this)).getTitle(this);
             if (t != null) name = t;
         } catch (RuntimeException ignored) {
-            // The tone is no longer available. Keep the default label.
+            // The tone is no longer available, so keep the default label.
         }
         ringtoneLabel.setText(name);
+    }
+
+    private void testRingtone() {
+        final MediaPlayer p = Ringer.startLoop(this);
+        if (p == null) {
+            Toast.makeText(this, "Could not play a ringtone on this phone", Toast.LENGTH_LONG).show();
+            return;
+        }
+        handler.postDelayed(() -> Ringer.stop(p), 3000);
+    }
+
+    private void testVibration() {
+        Vibrator v = getSystemService(Vibrator.class);
+        if (v == null) {
+            Toast.makeText(this, "This phone has no vibration motor", Toast.LENGTH_LONG).show();
+            return;
+        }
+        v.vibrate(VibrationEffect.createWaveform(new long[]{0, 600, 300, 600}, -1));
+    }
+
+    /** Asks Android to let Sigil run in the background, so incoming calls are not delayed. */
+    private void allowBackground() {
+        Intent i = new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Uri.parse("package:" + getPackageName()));
+        try {
+            startActivity(i);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "Open Settings > Battery and set Sigil to unrestricted", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void openUrl(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, url, Toast.LENGTH_LONG).show();
+        }
     }
 
     private void loadBlocked() {
@@ -128,6 +160,8 @@ public class SettingsActivity extends AppCompatActivity {
                 MaterialButton btn = new MaterialButton(this, null,
                         com.google.android.material.R.attr.materialButtonOutlinedStyle);
                 btn.setText("Unblock @" + user);
+                btn.setSingleLine(true);
+                btn.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
                 lp.topMargin = (int) (8 * getResources().getDisplayMetrics().density);

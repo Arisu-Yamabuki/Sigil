@@ -5,51 +5,63 @@
     android:background="@color/bg"
     android:orientation="vertical">
 
+    <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:background="@color/bg"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="12dp"
         android:paddingEnd="12dp"
-        android:paddingTop="8dp">
+        android:paddingTop="14dp"
+        android:paddingBottom="12dp">
 
-        <TextView
-            android:id="@+id/peerName"
+        <ImageButton
+            android:id="@+id/back"
+            style="@style/HeaderIconButton"
+            android:layout_marginStart="0dp"
+            android:contentDescription="Back"
+            android:src="@drawable/ic_arrow_back" />
+
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
             android:layout_weight="1"
-            android:textColor="@color/text"
-            android:textSize="20sp"
-            android:textStyle="bold" />
+            android:orientation="vertical">
 
-        <com.google.android.material.button.MaterialButton
+            <TextView
+                android:id="@+id/headerTitle"
+                style="@style/HeaderTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Chat" />
+        </LinearLayout>
+        <ImageButton
             android:id="@+id/callBtn"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:text="Call"
-            android:textAllCaps="false"
-            android:textColor="@color/teal" />
-
-        <com.google.android.material.button.MaterialButton
+            style="@style/HeaderIconButton"
+            android:contentDescription="Voice call"
+            android:src="@drawable/ic_call" />
+        <ImageButton
             android:id="@+id/keysBtn"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="40dp"
-            android:text="Keys"
-            android:textAllCaps="false"
-            android:textColor="@color/blue" />
-
+            style="@style/HeaderIconButton"
+            android:contentDescription="Keys"
+            android:src="@drawable/ic_key" />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/chatTimer"
             style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="wrap_content"
             android:layout_height="40dp"
+            android:layout_marginStart="8dp"
             android:textAllCaps="false"
             android:textSize="12sp" />
     </LinearLayout>
 
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/line" />
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/messages"
         android:layout_width="match_parent"

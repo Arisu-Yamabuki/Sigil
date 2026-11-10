@@ -1,6 +1,10 @@
 package org.sigil.app;
 
 import android.Manifest;
+import android.content.pm.PackageManager;
+import android.media.AudioManager;
+import androidx.core.content.ContextCompat;
+import org.webrtc.CameraVideoCapturer;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
@@ -62,7 +66,7 @@ import java.util.function.Consumer;
  * Setup messages travel through the server as PGP ciphertext made for the other person's key.
  *
  * The offer and answer are sent only after ICE gathering completes, so every network candidate
- * is inside the SDP. That makes setup work even when the callee wakes from a push later.
+ * is inside the SDP. That makes setup work even when the callee wakes from a push later.heh ..
  */
 public class CallActivity extends AppCompatActivity implements Signal.Listener {
 
@@ -103,16 +107,22 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     private SurfaceViewRenderer localView, remoteView;
     private TextView title, status;
     private View incomingRow, controls;
-    private MaterialButton acceptBtn, muteBtn, cameraBtn;
+    private MaterialButton acceptBtn;
+    private android.widget.ImageButton muteBtn, cameraBtn, speakerBtn, flipBtn;
+    private AudioManager audioManager;
+    private boolean speakerOn;
     private final List<String> queuedIce = new ArrayList<>();
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     private final ActivityResultLauncher<String[]> permissions = registerForActivityResult(
             new ActivityResultContracts.RequestMultiplePermissions(), result -> {
-                boolean audioOk = Boolean.TRUE.equals(result.get(Manifest.permission.RECORD_AUDIO));
-                boolean cameraOk = !video || Boolean.TRUE.equals(result.get(Manifest.permission.CAMERA));
-                if (audioOk && cameraOk) begin();
-                else endCall("Microphone or camera permission is needed", true);
+                if (missingPermissions().isEmpty()) {
+                    begin();
+                } else {
+                    endCall(video
+                            ? "Microphone and camera are needed for video calls. Allow them in Settings."
+                            : "Microphone is needed for calls. Allow it in Settings.", true);
+                }
             });
 
     @Override
@@ -162,6 +172,14 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         acceptBtn.setOnClickListener(v -> requestMediaThenBegin());
         muteBtn.setOnClickListener(v -> toggleMute());
         cameraBtn.setOnClickListener(v -> toggleCamera());
+        speakerBtn = findViewById(R.id.speakerBtn);
+        flipBtn = findViewById(R.id.flipBtn);
+        // Video calls play through the speaker by default. Voice calls use the earpiece.
+        speakerOn = video;
+        updateSpeakerButton();
+        flipBtn.setVisibility(video ? View.VISIBLE : View.GONE);
+        speakerBtn.setOnClickListener(v -> toggleSpeaker());
+        flipBtn.setOnClickListener(v -> flipCamera());
 
         Signal.connect(token);
         Signal.setListener(this);
@@ -290,8 +308,23 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
         incomingRow.setVisibility(View.GONE);
         controls.setVisibility(View.VISIBLE);
         Notifier.cancel(this, callId);
-        if (video) permissions.launch(new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA});
-        else permissions.launch(new String[]{Manifest.permission.RECORD_AUDIO});
+        java.util.List<String> missing = missingPermissions();
+        if (missing.isEmpty()) begin();
+        else permissions.launch(missing.toArray(new String[0]));
+    }
+
+    /** Microphone for every call. Camera too for video. Only what is not granted yet. */
+    private java.util.List<String> missingPermissions() {
+        java.util.List<String> need = new java.util.ArrayList<>();
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            need.add(Manifest.permission.RECORD_AUDIO);
+        }
+        if (video && ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            need.add(Manifest.permission.CAMERA);
+        }
+        return need;
     }
 
     /** Fetches the other person's key and TURN credentials, then builds the connection. */
@@ -319,6 +352,9 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     }
 
     private void initMedia() {
+        audioManager = getSystemService(AudioManager.class);
+        audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+        audioManager.setSpeakerphoneOn(speakerOn);
         PeerConnectionFactory.initialize(
                 PeerConnectionFactory.InitializationOptions.builder(getApplicationContext()).createInitializationOptions());
         // Only WebRTC errors reach logcat. This must run after its native library has loaded.
@@ -664,9 +700,10 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
                     .put("callId", callId)
                     .put("video", video)
                     .put("body", body);
-            return Signal.send(m);
+            return Signal.sendWithRetry(m);
         }, (ok, err) -> {
             if (err != null) endCall(Async.message(err), false);
+            else if (Boolean.FALSE.equals(ok)) endCall("Could not reach the server. Check your connection and try again.", false);
         });
     }
 
@@ -732,16 +769,35 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
 
     // ---- Controls -------------------------------------------------------------------------
 
+    private void toggleSpeaker() {
+        speakerOn = !speakerOn;
+        if (audioManager != null) audioManager.setSpeakerphoneOn(speakerOn);
+        updateSpeakerButton();
+    }
+
+    private void updateSpeakerButton() {
+        if (speakerBtn != null) speakerBtn.setSelected(speakerOn);
+    }
+
+    /** Switches between the front and back camera during a video call. */
+    private void flipCamera() {
+        if (capturer instanceof CameraVideoCapturer) {
+            ((CameraVideoCapturer) capturer).switchCamera(null);
+        }
+    }
+
     private void toggleMute() {
         muted = !muted;
         if (audioTrack != null) audioTrack.setEnabled(!muted);
-        muteBtn.setText(muted ? "Unmute" : "Mute");
+        muteBtn.setImageResource(muted ? R.drawable.ic_mic_off : R.drawable.ic_mic);
+        muteBtn.setSelected(muted);
     }
 
     private void toggleCamera() {
         cameraOff = !cameraOff;
         if (localVideo != null) localVideo.setEnabled(!cameraOff);
-        cameraBtn.setText(cameraOff ? "Camera on" : "Camera off");
+        cameraBtn.setImageResource(cameraOff ? R.drawable.ic_videocam_off : R.drawable.ic_videocam);
+        cameraBtn.setSelected(cameraOff);
     }
 
     // ---- Teardown -------------------------------------------------------------------------
@@ -766,6 +822,10 @@ public class CallActivity extends AppCompatActivity implements Signal.Listener {
     private void release() {
         if (released) return;
         released = true;
+        if (audioManager != null) {
+            audioManager.setSpeakerphoneOn(false);
+            audioManager.setMode(AudioManager.MODE_NORMAL);
+        }
         CallService.stop(this);
         try {
             if (capturer != null) {

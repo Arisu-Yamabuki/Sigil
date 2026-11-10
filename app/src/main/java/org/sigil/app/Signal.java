@@ -14,8 +14,8 @@ import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 
 /**
- * Keeps one WebSocket to the server for call setup. The socket carries only routing data and
- * ciphertext. Authentication happens with the first frame, not in the URL.
+ * One WebSocket to the server for call setup. It reconnects by itself, and sendWithRetry waits
+ * for the connection before giving up, so a call never fails silently after a dropped connection.
  */
 public final class Signal {
 
@@ -23,32 +23,36 @@ public final class Signal {
         void onCallMessage(JSONObject m);
     }
 
+    private static final long STALE_MS = 10_000;
+    private static final long RETRY_DELAY_MS = 3_000;
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final OkHttpClient HTTP = new OkHttpClient.Builder()
             .pingInterval(25, TimeUnit.SECONDS)
             .build();
-    private static final Runnable RECONNECT = Signal::open;
+    private static final Runnable RECONNECT = Signal::ensureConnected;
 
     private static volatile Listener listener;
     private static volatile boolean ready = false;
     private static volatile boolean wantConnected = false;
     private static volatile String token;
-    private static WebSocket socket;
+    private static volatile WebSocket socket;
+    private static volatile long openedAt;
 
     private Signal() {}
 
     public static void connect(String tok) {
         token = tok;
         wantConnected = true;
-        if (socket == null) open();
+        ensureConnected();
     }
 
     public static void disconnect() {
         wantConnected = false;
         MAIN.removeCallbacks(RECONNECT);
-        if (socket != null) socket.close(1000, "bye");
+        WebSocket s = socket;
         socket = null;
         ready = false;
+        if (s != null) s.close(1000, "bye");
         token = null;
     }
 
@@ -66,12 +70,35 @@ public final class Signal {
         return ready && s != null && s.send(o.toString());
     }
 
+    /** Reconnects if needed, then sends. Gives up after six seconds. */
+    public static boolean sendWithRetry(JSONObject o) throws InterruptedException {
+        long end = System.currentTimeMillis() + 6000;
+        while (true) {
+            ensureConnected();
+            if (send(o)) return true;
+            if (System.currentTimeMillis() > end) return false;
+            Thread.sleep(250);
+        }
+    }
+
+    /** Opens a connection when there is none, or when the last attempt has been stuck too long. */
+    public static synchronized void ensureConnected() {
+        if (!wantConnected || token == null || ready) return;
+        boolean stale = socket == null || System.currentTimeMillis() - openedAt > STALE_MS;
+        if (!stale) return;
+        WebSocket old = socket;
+        socket = null;
+        if (old != null) old.cancel();
+        open();
+    }
+
     private static void open() {
-        if (!wantConnected || token == null) return;
+        openedAt = System.currentTimeMillis();
         String url = BuildConfig.API_BASE.replaceFirst("^https", "wss") + "/ws";
-        socket = HTTP.newWebSocket(new Request.Builder().url(url).build(), new WebSocketListener() {
+        WebSocket created = HTTP.newWebSocket(new Request.Builder().url(url).build(), new WebSocketListener() {
             @Override
             public void onOpen(WebSocket ws, Response response) {
+                if (ws != socket) return;
                 try {
                     ws.send(new JSONObject().put("type", "auth").put("token", token).toString());
                 } catch (Exception e) {
@@ -81,6 +108,7 @@ public final class Signal {
 
             @Override
             public void onMessage(WebSocket ws, String text) {
+                if (ws != socket) return;
                 try {
                     JSONObject m = new JSONObject(text);
                     String type = m.optString("type");
@@ -99,21 +127,22 @@ public final class Signal {
 
             @Override
             public void onFailure(WebSocket ws, Throwable t, Response response) {
-                ready = false;
-                socket = null;
-                scheduleReconnect();
+                if (ws != socket) return;
+                drop();
             }
 
             @Override
             public void onClosed(WebSocket ws, int code, String reason) {
-                ready = false;
-                socket = null;
-                if (code != 1000) scheduleReconnect();
+                if (ws != socket) return;
+                drop();
             }
         });
+        socket = created;
     }
 
-    private static void scheduleReconnect() {
-        if (wantConnected) MAIN.postDelayed(RECONNECT, 5000);
+    private static void drop() {
+        ready = false;
+        socket = null;
+        if (wantConnected) MAIN.postDelayed(RECONNECT, RETRY_DELAY_MS);
     }
 }
